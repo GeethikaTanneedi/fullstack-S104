@@ -2,53 +2,34 @@ pipeline {
     agent any
 
     tools {
-        jdk 'JDK_HOME'
-        maven 'MAVEN_HOME'
+        nodejs 'NodeJS'      // NodeJS installation name in Jenkins
+        maven 'MAVEN_HOME'      // Maven installation name in Jenkins
+        jdk 'JDK_HOME'          // JDK installation name in Jenkins
     }
 
     environment {
         TOMCAT_URL = 'http://13.204.178.107:9090/manager/text'
         TOMCAT_USER = 'admin'
         TOMCAT_PASS = 'admin'
+    }
 
-        MAIN_REPO = 'https://github.com/GeethikaTanneedi/fullstack-S104.git'
-
-        BACKEND_DIR = 'crud_back'
-        FRONTEND_DIR = 'crud_front'
-
-        BACKEND_WAR = 'crud_back/target/springapp1.war'
-        FRONTEND_WAR = 'crud_front/frontapp1.war'
+    options {
+        // Stop the pipeline on the first failure
+        skipStagesAfterUnstable()
+        ansiColor('xterm')
+        timestamps()
     }
 
     stages {
-        stage('Check Tools') {
-            steps {
-                sh '''
-                    echo "=== Checking Installed Tools ==="
-                    echo "PATH: $PATH"
-                    java -version || echo "Java NOT found"
-                    mvn -v || echo "Maven NOT found"
-                    node -v || echo "Node.js NOT found"
-                    npm -v || echo "npm NOT found"
-                    curl --version || echo "curl NOT found"
-                    echo "================================"
-                '''
-            }
-        }
-
         stage('Clone Repository') {
             steps {
-                git branch: 'main', url: "${env.MAIN_REPO}"
+                git branch: 'main', url: 'https://github.com/GeethikaTanneedi/fullstack-S104.git'
             }
         }
 
         stage('Build React Frontend') {
             steps {
-                script {
-                    def nodeHome = tool name: 'NODE_HOME', type: 'jenkins.plugins.nodejs.tools.NodeJSInstallation'
-                    env.PATH = "${nodeHome}/bin:${env.PATH}"
-                }
-                dir("${env.FRONTEND_DIR}") {
+                dir('crud_front') {
                     sh 'npm install'
                     sh 'npm run build'
                 }
@@ -57,35 +38,59 @@ pipeline {
 
         stage('Package React as WAR') {
             steps {
-                script {
-                    def warDir = "${env.FRONTEND_DIR}/war_content"
-                    sh "rm -rf ${warDir}"
-                    sh "mkdir -p ${warDir}/META-INF ${warDir}/WEB-INF"
-                    sh "cp -r ${env.FRONTEND_DIR}/dist/* ${warDir}/"
-                    sh "jar -cvf ${env.FRONTEND_WAR} -C ${warDir} ."
+                dir('crud_front') {
+                    sh '''
+                    mkdir -p target
+                    cp -r build/* target/
+                    jar -cvf target/frontend.war -C target/ .
+                    '''
+                    // Archive frontend WAR
+                    archiveArtifacts artifacts: 'target/frontend.war', fingerprint: true
                 }
             }
         }
 
-        stage('Build Spring Boot App') {
+        stage('Build Spring Boot Backend') {
             steps {
-                dir("${env.BACKEND_DIR}") {
+                dir('crud_backend') {
                     sh 'mvn clean package'
-                    sh 'mv target/*.war target/springapp1.war'
+                    // Archive backend WAR/JAR
+                    archiveArtifacts artifacts: 'target/*.war', fingerprint: true
                 }
             }
         }
 
-        stage('Deploy Spring Boot WAR') {
+        stage('Deploy Backend WAR') {
             steps {
-                sh "curl -u ${env.TOMCAT_USER}:${env.TOMCAT_PASS} --upload-file \"${env.BACKEND_WAR}\" \"${env.TOMCAT_URL}/deploy?path=/springapp1&update=true\""
+                dir('crud_backend') {
+                    sh """
+                    curl --upload-file target/backend.war \
+                    ${TOMCAT_URL}/deploy?path=/backend&update=true \
+                    --user ${TOMCAT_USER}:${TOMCAT_PASS}
+                    """
+                }
             }
         }
 
         stage('Deploy Frontend WAR') {
             steps {
-                sh "curl -u ${env.TOMCAT_USER}:${env.TOMCAT_PASS} --upload-file \"${env.FRONTEND_WAR}\" \"${env.TOMCAT_URL}/deploy?path=/frontapp1&update=true\""
+                dir('crud_front') {
+                    sh """
+                    curl --upload-file target/frontend.war \
+                    ${TOMCAT_URL}/deploy?path=/frontend&update=true \
+                    --user ${TOMCAT_USER}:${TOMCAT_PASS}
+                    """
+                }
             }
+        }
+    }
+
+    post {
+        failure {
+            echo '❌ Pipeline failed. Check the logs for errors.'
+        }
+        success {
+            echo '✅ Pipeline succeeded. Frontend and Backend deployed successfully!'
         }
     }
 }
