@@ -21,6 +21,21 @@ pipeline {
     }
 
     stages {
+        stage('Check Tools') {
+            steps {
+                sh '''
+                    echo "=== Checking Installed Tools ==="
+                    echo "PATH: $PATH"
+                    java -version || echo "Java NOT found"
+                    mvn -v || echo "Maven NOT found"
+                    node -v || echo "Node.js NOT found"
+                    npm -v || echo "npm NOT found"
+                    curl --version || echo "curl NOT found"
+                    echo "================================"
+                '''
+            }
+        }
+
         stage('Clone Repository') {
             steps {
                 git branch: 'main', url: "${env.MAIN_REPO}"
